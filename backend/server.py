@@ -91,6 +91,7 @@ async def drawio_parse(payload: dict, user_id: str = Depends(get_current_user_id
         "service_counts": parsed["service_counts"],
         "cost_breakdown": cost_items,
         "estimated_monthly_cost_usd": total_cost(cost_items),
+        "region": region,
     }
 
 

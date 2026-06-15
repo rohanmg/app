@@ -116,7 +116,7 @@ async def generate_lld_stream(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"lld-{title[:40]}",
         system_message=SYSTEM_PROMPT,
-    ).with_model("anthropic", MODEL).with_params(max_tokens=5000)
+    ).with_model("anthropic", MODEL).with_params(max_tokens=7000)
 
     user_prompt = _build_user_prompt(title, pages, service_counts, cost_breakdown, total_cost, xml_excerpt)
 
