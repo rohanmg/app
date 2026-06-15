@@ -1,0 +1,47 @@
+{
+  "summary": "Backend fully verified (17/17 pytest pass, ~54s incl. real Claude Sonnet 4.5 LLM streaming). Frontend: landing/register/login/logout/generate UI all work, BUT the live LLD generation in the browser fails — the SSE stream is cut mid-stream by the preview-URL ingress before the backend can emit the final `done` event, so the page shows '✗ ERROR: Generation did not complete' and never navigates to /lld/:id. Because the FastAPI generator is cancelled when the client disconnects, no LLD is persisted, breaking the entire end-to-end UX through the browser.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "LLD Generation (POST /api/lld/generate SSE) from browser",
+        "issue": "Reader.read() returns done=true after ~9-10 KB of delta events without ever receiving the {type:'done', lld_id} event. Frontend then throws 'Generation did not complete' and stays on /generate. Verified via API: zero LLDs exist for the UI test user after the run — the backend generator is cancelled mid-flight because of the client disconnect, so insert_one() is never reached and no doc is saved.",
+        "affected_selectors": ["[data-testid='generate-btn']", "[data-testid='stream-log']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix the streaming-cut-mid-flight problem. Backend StreamingResponse already sets `X-Accel-Buffering: no` and `Cache-Control: no-cache`, but the browser still loses the connection before completion. Recommended mitigations: (a) make the persistence step robust to client disconnect by wrapping the generator body in a try/finally so the LLD is still saved when the client goes away (use `asyncio.shield(...)` for the insert, or persist BEFORE yielding 'done'); (b) emit periodic keep-alive comments (`: ping\\n\\n`) every 10-15s to keep the proxy from buffering/idling the stream; (c) on the frontend side, after the reader finishes without a `done` event, fall back to GET /api/lld and find the most recent matching title to recover the LLD id and navigate.",
+    "Also consider increasing FastAPI/uvicorn proxy headers or returning an explicit `Transfer-Encoding: chunked` and `Connection: keep-alive` — both already present, so the most likely culprit is the public ingress idle-timeout cutting the stream.",
+    "Once SSE recovery is in place, re-run the full /generate → /lld/:id viewer flow to validate diagram preview, TOC, service pills (pill-<service>), diagram-node-<id> clicks, and export-md/export-docx downloads end-to-end (these were not reachable because of the streaming cut)."
+  ],
+  "critical_code_review_comments": [
+    "server.py: the SSE `event_stream()` does NOT persist the LLD if the client disconnects (no shield/finally). This is the root cause of the UI failure. Wrap `await llds_col.insert_one(...)` in a finally block (or persist incrementally) so a network blip doesn't lose 60s of LLM work.",
+    "server.py: also consider yielding heartbeat comments (e.g., `yield ': keepalive\\n\\n'`) between LLM chunks to defeat any idle-timeout in the ingress.",
+    "Generate.jsx: when the reader reports done=true without seeing payload.type==='done', the UI dead-ends. Add a fallback that re-queries /api/lld to find the most recent LLD with the same title and navigate to it, OR show a clear retry CTA.",
+    "Models leak: GET /api/lld/:id returns the full LLD including the raw user XML and the entire layout payload — fine for now but ensure pagination/size limits if XML gets large.",
+    "lld_generator.py / cost_estimator.py not viewed in depth but backend tests show they work; keep imports tight."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "70% (auth + nav + generate UI all work; live SSE generation → viewer flow blocked by streaming cut)"
+  },
+  "test_credentials": "test@architecht.dev / testpass123 (login works); fresh UI users created with format ui_<8hex>@architecht.dev / uitestpass123",
+  "seed_data_creation": "Pytest creates and tears down its own LLD (title TEST_Architecht_LLD). Frontend run created the user ui_<rand>@architecht.dev but no LLD was persisted (see RCA).",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Backend is solid — 17 pytest tests in /app/backend/tests/backend_test.py cover health, auth (register/duplicate/login/me), drawio parse (multi-page + simple + invalid + unauth), full SSE LLD generation with real Claude Sonnet 4.5 (took ~50s), CRUD list/get/delete, user-isolation 404s, markdown + docx exports (verified .docx starts with PK). Re-run with: `python -m pytest /app/backend/tests/backend_test.py -v`. For frontend, the key blocker is SSE streaming in the browser context — once main agent adds persistence in a finally block and/or heartbeats, validate the /generate → /lld/:id viewer flow including pill-<service>, diagram-node-<id>, toc-<slug>, export-md and export-docx data-testids.",
+  "rca of the issue": "Reproduction: 1) login as test@architecht.dev in browser via UI, 2) /generate, paste any valid drawio XML, 3) click Generate LLD. Observation: stream-log fills with ~9 KB of LLM output, then last line is '✗ ERROR: Generation did not complete' and user stays on /generate. GET /api/lld returns []. Backend pytest hitting the SAME public URL streams 53s+ to completion fine. Conclusion: the browser fetch over the public preview ingress is being closed before the generator finishes (likely an idle/inactivity timeout because individual delta chunks can be small and slow). Because server.py only persists the LLD AFTER the streaming loop completes, the disconnect cancels the generator and nothing is saved. Mitigation: persist inside a `try/finally` so the LLD is always saved with whatever markdown was accumulated, and emit periodic keep-alive comments to keep the proxy from idling out."
+}
