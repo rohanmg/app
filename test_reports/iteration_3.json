@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 3 testing: share/public/pricing/region features. Found and FIXED a critical regression in server.py — drawio_parse and lld_generate called the now-async estimate_costs() synchronously, breaking /api/drawio/parse (500) and /api/lld/generate. After fix, 24/32 pytest pass. The 8 failures are NOT code regressions: 7 cascade from an Emergent LLM budget cap being exceeded mid-run ('Budget has been exceeded! Current cost: 0.510012, Max budget: 0.4'), and 1 is the generated markdown being truncated mid-section (missing Recommendations/Pros/Cons/Blockers — likely max_tokens too low in lld_generator). All new share/public/pricing endpoints and the full frontend share dialog + /share/:token flow + region selector + refresh-prices verified working end-to-end via Playwright.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/drawio/parse, /api/lld/generate", "issue": "FIXED by testing agent: estimate_costs() is async (takes region + cache_col) but server.py called it synchronously → 'TypeError: coroutine object is not iterable' → HTTP 500. Awaited both call sites and passed region+pricing_cache_col.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "/api/lld/generate", "issue": "Generated markdown is truncated mid-section (ends in CI/CD section). Sections Recommendations / Pros / Cons / Blockers missing from at least one run. Likely max_tokens / max_completion_tokens in lld_generator.py is too low for the new ~2200-word prompt — needs bumping."},
+      {"endpoint": "Emergent LLM key", "issue": "Budget cap exceeded during pytest run ('Current cost: 0.510012, Max budget: 0.4'). This is environmental, not a code bug, but causes /api/lld/generate to return 'error' events and the entire downstream test_share_pricing + backend_test LLD-dependent tests to skip/fail. Main agent should ensure the EMERGENT_LLM_KEY budget is raised or the test fixture is reused across the suite."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/lld/:id viewer", "issues": ["Pre-existing benign React dev console warning 'React does not recognize the %s prop on a DOM element' from markdown code block — same as iteration_2, still present."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_share_pricing.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "VERIFY: I patched /app/backend/server.py to await estimate_costs() with region+pricing_cache_col in both drawio_parse and lld_generate — re-run pytest to confirm.",
+    "Raise the Emergent LLM key budget (currently 0.4 USD cap is exceeded by a single full pytest run that generates 2 LLDs).",
+    "Increase max_tokens in /app/backend/lld_generator.py — the new simplified-but-comprehensive prompt is being truncated before Recommendations/Pros/Cons/Blockers can render (we hit token cap mid-CI/CD section).",
+    "Consider sharing a single generated LLD across both pytest test files (module-scoped fixture in a conftest.py) to halve the LLM cost per run."
+  ],
+  "critical_code_review_comments": [
+    "[CRITICAL/FIXED] server.py:87 and server.py:105 — calls were synchronous against an async function. Iteration 2 baseline pytest passed because cost_estimator was still sync then; this iteration's cost_estimator/aws_pricing refactor to async broke server.py. Both call sites now await and pass region + pricing_cache_col.",
+    "lld_generator.py: appears to be missing/low max_tokens budget. The new prompt asks for ~1500-2200 words plus tables, but the streamed response is cut off mid-section. Recommend bumping max_completion_tokens to ~6000.",
+    "aws_pricing.py: Lambda live fetch verified working (returns $0.42/mo for the assumed SKU). S3/DynamoDB/SQS/SNS pickers may or may not succeed depending on bulk JSON schema — refresh_all gracefully reports ok:false per service. Curated fallback works.",
+    "Public endpoint correctly omits user_id and xml fields (verified via assertions). Token revoke nulls share_token and is_public — subsequent GET returns 404 as expected.",
+    "GET /api/pricing returns 69 items as expected; region multipliers correctly applied (e.g. EC2 30.37 → 28.85 at ap-south-1 = 0.95x; eu-west-1 > us-east-1).",
+    "Share endpoint is idempotent (same token returned on repeat call) — verified."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (awaited estimate_costs in drawio_parse and lld_generate, passing region + pricing_cache_col)",
+    "/app/backend/tests/test_share_pricing.py (NEW: 12 new tests covering pricing, region LLD, share/public/revoke)"
+  ],
+  "success_rate": {
+    "backend": "75% (24/32 pytest; 7 of 8 failures cascade from one root cause: Emergent LLM budget exceeded; 1 from markdown truncation in LLM output)",
+    "frontend": "100% on share/public/region UI flows verified (region-select default us-east-1, refresh-prices button, share-btn → share-dialog → share-enable → share-url/copy/open/revoke, public-title + 4 public-pill-* + public-register on /share/:token in an isolated browser context with no auth, post-revoke /share/:token shows 'Link unavailable')"
+  },
+  "test_credentials": "test@architecht.dev / testpass123 (works)",
+  "seed_data_creation": "Pytest creates and tears down its own LLDs with TEST_ prefix. The seed 'UI Recovery Test 1' (id c361c14f-3b4a-4d82-996f-b436829b25da) was used to test share dialog and revoked back to non-public at the end of the run.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "After main agent (1) increases EMERGENT_LLM_KEY budget and (2) bumps max_completion_tokens in lld_generator.py, re-run `python -m pytest /app/backend/tests/backend_test.py /app/backend/tests/test_share_pricing.py -v` — expect 32/32 pass. The critical async/await fix in server.py is already in place. Backend pricing/share/public endpoints are fully verified via 12 new tests in test_share_pricing.py. Frontend flows (region select, share dialog, /share/:token public page, revoke) all verified working via Playwright.",
+  "rca of the issue": "Root cause of the iteration-3-introduced server 500s: when cost_estimator was refactored to async (to support async mongo cache lookups via aws_pricing.get_price), the two callers in server.py (drawio_parse, lld_generate) were not updated to `await` the call. This left `cost_items` as a coroutine, which then exploded in `total_cost` ('TypeError: coroutine object is not iterable') and was also passed into generate_lld_stream. Reproducer: POST /api/drawio/parse with any valid XML → 500. Fix: changed both lines to `await estimate_costs(parsed['service_counts'], region=..., cache_col=pricing_cache_col)`. Validated via curl post-fix: returns full cost_breakdown JSON with correct unit_cost_usd and source='curated'/'live-bulk-json'."
+}

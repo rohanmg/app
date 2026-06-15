@@ -9,6 +9,7 @@ import Register from "@/pages/Register";
 import Dashboard from "@/pages/Dashboard";
 import Generate from "@/pages/Generate";
 import LLDViewer from "@/pages/LLDViewer";
+import PublicLLDViewer from "@/pages/PublicLLDViewer";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/share/:token" element={<PublicLLDViewer />} />
           <Route
             path="/dashboard"
             element={

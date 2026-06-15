@@ -18,13 +18,15 @@ load_dotenv(ROOT_DIR / ".env")
 
 from models import (
     UserCreate, UserLogin, UserPublic, UserInDB, AuthResponse,
-    GenerateRequest, LLD, LLDSummary,
+    GenerateRequest, LLD, LLDSummary, PublicLLD,
 )
 from auth import hash_password, verify_password, create_token, get_current_user_id
 from drawio_parser import parse_drawio
 from cost_estimator import estimate_costs, total_cost
 from lld_generator import generate_lld_stream
 from exporters import markdown_to_docx
+import aws_pricing
+import secrets
 
 # MongoDB
 mongo_url = os.environ["MONGO_URL"]
@@ -32,6 +34,7 @@ mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[os.environ["DB_NAME"]]
 users_col = db["users"]
 llds_col = db["llds"]
+pricing_cache_col = db["pricing_cache"]
 
 app = FastAPI(title="Architecht — Draw.io to LLD")
 api = APIRouter(prefix="/api")
@@ -81,7 +84,8 @@ async def drawio_parse(payload: dict, user_id: str = Depends(get_current_user_id
         parsed = parse_drawio(xml)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    cost_items = estimate_costs(parsed["service_counts"])
+    region = payload.get("region", "us-east-1")
+    cost_items = await estimate_costs(parsed["service_counts"], region=region, cache_col=pricing_cache_col)
     return {
         "pages": parsed["pages"],
         "service_counts": parsed["service_counts"],
@@ -99,7 +103,7 @@ async def lld_generate(payload: GenerateRequest, user_id: str = Depends(get_curr
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    cost_items = estimate_costs(parsed["service_counts"])
+    cost_items = await estimate_costs(parsed["service_counts"], region=payload.region, cache_col=pricing_cache_col)
     total = total_cost(cost_items)
 
     pages_for_layout = [
@@ -139,7 +143,15 @@ async def lld_generate(payload: GenerateRequest, user_id: str = Depends(get_curr
                 xml=payload.xml,
                 markdown=markdown,
                 services=[
-                    {"name": s["name"], "category": s["category"], "count": s["count"], "monthly_cost_usd": s["monthly_cost_usd"]}
+                    {
+                        "name": s["name"],
+                        "category": s["category"],
+                        "count": s["count"],
+                        "monthly_cost_usd": s["monthly_cost_usd"],
+                        "unit_cost_usd": s.get("unit_cost_usd", 0.0),
+                        "assumption": s.get("assumption", ""),
+                        "source": s.get("source", "curated"),
+                    }
                     for s in cost_items
                 ],
                 pages=[
@@ -148,6 +160,7 @@ async def lld_generate(payload: GenerateRequest, user_id: str = Depends(get_curr
                 ],
                 layout={"pages": pages_for_layout},
                 estimated_monthly_cost_usd=total,
+                region=payload.region,
             )
             # shield so client disconnect mid-await still writes to mongo
             await asyncio.shield(llds_col.insert_one(lld.model_dump()))
@@ -244,6 +257,85 @@ async def delete_lld(lld_id: str, user_id: str = Depends(get_current_user_id)):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="LLD not found")
     return {"ok": True}
+
+
+# ---------- SHARING ----------
+@api.post("/lld/{lld_id}/share")
+async def share_lld(lld_id: str, user_id: str = Depends(get_current_user_id)):
+    doc = await llds_col.find_one({"id": lld_id, "user_id": user_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="LLD not found")
+    token = doc.get("share_token") or secrets.token_urlsafe(18)
+    await llds_col.update_one(
+        {"id": lld_id, "user_id": user_id},
+        {"$set": {"share_token": token, "is_public": True}},
+    )
+    return {"share_token": token, "is_public": True}
+
+
+@api.delete("/lld/{lld_id}/share")
+async def unshare_lld(lld_id: str, user_id: str = Depends(get_current_user_id)):
+    res = await llds_col.update_one(
+        {"id": lld_id, "user_id": user_id},
+        {"$set": {"is_public": False, "share_token": None}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="LLD not found")
+    return {"is_public": False}
+
+
+@api.get("/public/lld/{token}", response_model=PublicLLD)
+async def get_public_lld(token: str):
+    """Public, no-auth read-only LLD."""
+    doc = await llds_col.find_one(
+        {"share_token": token, "is_public": True}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Shared LLD not found or revoked")
+    return PublicLLD(
+        id=doc["id"],
+        title=doc["title"],
+        markdown=doc["markdown"],
+        services=doc.get("services", []),
+        pages=doc.get("pages", []),
+        layout=doc.get("layout", {}),
+        estimated_monthly_cost_usd=doc.get("estimated_monthly_cost_usd", 0.0),
+        region=doc.get("region", "us-east-1"),
+        created_at=doc["created_at"],
+    )
+
+
+# ---------- PRICING ----------
+@api.get("/pricing")
+async def pricing_preview(region: str = "us-east-1"):
+    """Show current cached + curated prices for every known service in the region."""
+    items = []
+    for canonical in aws_pricing.CURATED.keys():
+        unit, assumption, source = await aws_pricing.get_price(canonical, region, pricing_cache_col)
+        items.append({
+            "name": canonical,
+            "category": aws_pricing.category_for(canonical),
+            "unit_cost_usd": unit,
+            "assumption": assumption,
+            "source": source,
+            "live_capable": canonical in aws_pricing.LIVE_OFFER_CODES,
+        })
+    return {
+        "region": region,
+        "items": sorted(items, key=lambda x: x["name"]),
+        "supported_regions": sorted(aws_pricing.REGION_MULTIPLIERS.keys()),
+    }
+
+
+@api.post("/pricing/refresh")
+async def pricing_refresh(
+    region: str = "us-east-1",
+    user_id: str = Depends(get_current_user_id),
+):
+    """Refresh prices for live-capable services in the given region from the
+    public AWS Bulk Pricing JSON (no AWS credentials required)."""
+    results = await aws_pricing.refresh_all(pricing_cache_col, region=region)
+    return {"region": region, "results": results}
 
 
 # ---------- EXPORTS ----------

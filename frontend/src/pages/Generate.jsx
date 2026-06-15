@@ -1,9 +1,17 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
-import { API } from "@/lib/api";
-import { UploadSimple, Code, Cube, Lightning, Warning } from "@phosphor-icons/react";
+import { API, api } from "@/lib/api";
+import { UploadSimple, Code, Cube, Lightning, Warning, GlobeHemisphereWest, ArrowsClockwise } from "@phosphor-icons/react";
 import { toast } from "sonner";
+
+const REGIONS = [
+  "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+  "ca-central-1",
+  "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
+  "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
+  "sa-east-1", "me-south-1", "af-south-1",
+];
 
 export default function Generate() {
   const navigate = useNavigate();
@@ -11,11 +19,27 @@ export default function Generate() {
   const [xml, setXml] = useState("");
   const [title, setTitle] = useState("");
   const [fileName, setFileName] = useState("");
+  const [region, setRegion] = useState("us-east-1");
   const [generating, setGenerating] = useState(false);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [streamLog, setStreamLog] = useState([]);
   const [progress, setProgress] = useState(0); // chars received
   const fileInputRef = useRef(null);
   const logRef = useRef(null);
+
+  const refreshPrices = async () => {
+    setRefreshingPrices(true);
+    try {
+      const { data } = await api.post(`/pricing/refresh?region=${region}`);
+      const ok = Object.values(data.results).filter((r) => r.ok).length;
+      const tot = Object.keys(data.results).length;
+      toast.success(`AWS prices refreshed (${ok}/${tot} services live)`);
+    } catch {
+      toast.error("Price refresh failed");
+    } finally {
+      setRefreshingPrices(false);
+    }
+  };
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -61,7 +85,7 @@ export default function Generate() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ title, xml }),
+        body: JSON.stringify({ title, xml, region }),
       });
 
       if (!res.ok) {
@@ -188,6 +212,41 @@ export default function Generate() {
                 className="w-full bg-black border border-zinc-800 px-3 py-2.5 text-sm focus:border-white focus:outline-none font-mono"
                 disabled={generating}
               />
+            </div>
+
+            <div className="mb-5 grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500 mb-2">
+                  <GlobeHemisphereWest size={11} className="inline mr-1" /> AWS Region
+                </label>
+                <select
+                  data-testid="region-select"
+                  value={region}
+                  onChange={(e) => setRegion(e.target.value)}
+                  disabled={generating}
+                  className="w-full bg-black border border-zinc-800 px-3 py-2.5 text-sm focus:border-white focus:outline-none font-mono"
+                >
+                  {REGIONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500 mb-2">
+                  Prices
+                </label>
+                <button
+                  type="button"
+                  data-testid="refresh-prices"
+                  onClick={refreshPrices}
+                  disabled={generating || refreshingPrices}
+                  title="Pull live prices for supported services from AWS Bulk Pricing JSON"
+                  className="w-full border border-zinc-800 hover:border-zinc-500 px-2 py-2.5 text-[10px] font-mono uppercase tracking-wider text-zinc-300 hover:text-white transition-colors disabled:opacity-40 flex items-center justify-center gap-1.5"
+                >
+                  <ArrowsClockwise size={12} weight={refreshingPrices ? "fill" : "regular"} className={refreshingPrices ? "animate-spin" : ""} />
+                  {refreshingPrices ? "..." : "Refresh"}
+                </button>
+              </div>
             </div>
 
             {mode === "upload" ? (

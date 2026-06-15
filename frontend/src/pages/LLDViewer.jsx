@@ -5,14 +5,16 @@ import remarkGfm from "remark-gfm";
 import { api, API } from "@/lib/api";
 import Layout from "@/components/Layout";
 import DiagramPreview from "@/components/DiagramPreview";
-import { DownloadSimple, FileText, FileDoc, CurrencyDollar, ArrowLeft, Stack } from "@phosphor-icons/react";
+import { DownloadSimple, FileText, FileDoc, CurrencyDollar, ArrowLeft, Stack, ShareNetwork, GlobeHemisphereWest } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import ShareDialog from "@/components/ShareDialog";
 
 export default function LLDViewer() {
   const { id } = useParams();
   const [lld, setLld] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeService, setActiveService] = useState(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const docRef = useRef(null);
 
   useEffect(() => {
@@ -124,14 +126,36 @@ export default function LLDViewer() {
               <span className="text-zinc-700">•</span>
               <span>{lld.services.length} services</span>
               <span className="text-zinc-700">•</span>
+              <span className="inline-flex items-center gap-1"><GlobeHemisphereWest size={12} /> {lld.region || "us-east-1"}</span>
+              <span className="text-zinc-700">•</span>
               <span className="text-amber-500 inline-flex items-center gap-1">
                 <CurrencyDollar size={12} weight="bold" />
                 {lld.estimated_monthly_cost_usd.toFixed(0)}/mo est.
               </span>
+              {lld.is_public && (
+                <>
+                  <span className="text-zinc-700">•</span>
+                  <span className="text-green-400 inline-flex items-center gap-1">
+                    <ShareNetwork size={12} weight="fill" /> public
+                  </span>
+                </>
+              )}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              data-testid="share-btn"
+              onClick={() => setShareOpen(true)}
+              className={`flex items-center gap-1.5 border px-3 py-2 text-[11px] font-mono uppercase tracking-wider transition-colors rounded-sm ${
+                lld.is_public
+                  ? "border-green-700/50 text-green-400 hover:bg-green-950/30"
+                  : "border-zinc-800 hover:border-zinc-500 text-zinc-300 hover:text-white"
+              }`}
+            >
+              <ShareNetwork size={13} weight={lld.is_public ? "fill" : "regular"} />
+              {lld.is_public ? "Public" : "Share"}
+            </button>
             <button
               data-testid="export-md"
               onClick={() => downloadFile("markdown")}
@@ -164,6 +188,7 @@ export default function LLDViewer() {
                 key={s.name}
                 data-testid={`pill-${s.name.replace(/\s+/g, "-").toLowerCase()}`}
                 onClick={() => onNodeClick(s.name)}
+                title={s.assumption ? `${s.assumption} — $${s.monthly_cost_usd}/mo (${s.source})` : undefined}
                 className={`font-mono text-[10px] uppercase tracking-wider border px-2 py-1 transition-colors ${
                   activeService === s.name
                     ? "bg-amber-500 text-black border-amber-500"
@@ -242,6 +267,18 @@ export default function LLDViewer() {
           </div>
         </div>
       </div>
+
+      <ShareDialog
+        lldId={id}
+        open={shareOpen}
+        onClose={() => {
+          setShareOpen(false);
+          // refresh to reflect new public state in header
+          api.get(`/lld/${id}`).then(({ data }) => setLld(data)).catch(() => {});
+        }}
+        initialPublic={lld.is_public}
+        initialToken={lld.share_token}
+      />
     </Layout>
   );
 }

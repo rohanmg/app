@@ -50,6 +50,9 @@ class DetectedService(BaseModel):
     category: str = "compute"
     count: int = 1
     monthly_cost_usd: float = 0.0
+    unit_cost_usd: float = 0.0
+    assumption: str = ""
+    source: str = "curated"
 
 
 class DrawioPage(BaseModel):
@@ -62,6 +65,7 @@ class DrawioPage(BaseModel):
 class GenerateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     xml: str
+    region: str = "us-east-1"
 
 
 class LLD(BaseModel):
@@ -75,6 +79,9 @@ class LLD(BaseModel):
     pages: List[DrawioPage] = []
     layout: Dict[str, Any] = {}  # nodes/edges for the preview
     estimated_monthly_cost_usd: float = 0.0
+    region: str = "us-east-1"
+    share_token: Optional[str] = None
+    is_public: bool = False
     created_at: str = Field(default_factory=_now_iso)
 
 
@@ -83,4 +90,19 @@ class LLDSummary(BaseModel):
     title: str
     service_count: int
     estimated_monthly_cost_usd: float
+    region: str = "us-east-1"
+    is_public: bool = False
+    created_at: str
+
+
+class PublicLLD(BaseModel):
+    """View-only payload returned for a shared link (no user_id / no XML if too large)."""
+    id: str
+    title: str
+    markdown: str
+    services: List[DetectedService]
+    pages: List[DrawioPage]
+    layout: Dict[str, Any]
+    estimated_monthly_cost_usd: float
+    region: str
     created_at: str

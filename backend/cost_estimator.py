@@ -1,24 +1,28 @@
-"""Approximate monthly AWS cost estimator based on detected services."""
-from typing import Dict, List
-from drawio_parser import AWS_SERVICE_MAP
+"""Cost estimator that uses aws_pricing (curated + live bulk JSON cache)."""
+from typing import Dict, List, Optional
+
+from motor.motor_asyncio import AsyncIOMotorCollection
+
+from aws_pricing import get_price, category_for
 
 
-def estimate_costs(service_counts: Dict[str, int]) -> List[Dict]:
-    """Returns list of dicts: {name, category, count, monthly_cost_usd}."""
-    out = []
-    # invert AWS_SERVICE_MAP to get canonical -> (category, cost)
-    canonical_meta = {}
-    for _key, (canonical, category, cost) in AWS_SERVICE_MAP.items():
-        if canonical not in canonical_meta:
-            canonical_meta[canonical] = (category, cost)
-
+async def estimate_costs(
+    service_counts: Dict[str, int],
+    region: str = "us-east-1",
+    cache_col: Optional[AsyncIOMotorCollection] = None,
+) -> List[Dict]:
+    """Returns list of dicts: {name, category, count, unit_cost_usd, monthly_cost_usd, assumption, source}."""
+    out: List[Dict] = []
     for name, count in service_counts.items():
-        category, unit_cost = canonical_meta.get(name, ("other", 10.0))
+        unit, assumption, source = await get_price(name, region, cache_col)
         out.append({
             "name": name,
-            "category": category,
+            "category": category_for(name),
             "count": count,
-            "monthly_cost_usd": round(unit_cost * count, 2),
+            "unit_cost_usd": unit,
+            "monthly_cost_usd": round(unit * count, 2),
+            "assumption": assumption,
+            "source": source,
         })
     return sorted(out, key=lambda x: -x["monthly_cost_usd"])
 
