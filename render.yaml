@@ -1,39 +1,58 @@
 # Render Blueprint for Architecht
-# Spin up backend (FastAPI) + frontend (static React build) in one click.
-# MongoDB is expected to come from MongoDB Atlas (free M0) — set MONGO_URL via dashboard.
+# One-click deploy: backend + frontend + self-hosted MongoDB (free `mongo:7` Docker image).
+# No external services to configure — only secret you must paste in the dashboard
+# is your AWS Bedrock API key.
 
 services:
-  # ----- Backend API -----
+  # ----- Self-hosted MongoDB (free image) -----
+  - type: pserv                # private service: NOT exposed to the public internet
+    name: architecht-mongo
+    runtime: image
+    image:
+      url: docker.io/library/mongo:7
+    region: singapore          # closest Render region to ap-southeast-2 (Sydney)
+    plan: starter
+    autoDeploy: false
+    disk:
+      name: mongo-data
+      mountPath: /data/db
+      sizeGB: 1
+
+  # ----- Backend API (FastAPI) -----
   - type: web
     name: architecht-backend
     runtime: python
-    plan: starter            # bump to standard for higher RAM if your LLDs are large
-    region: oregon
+    plan: starter
+    region: singapore
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/
     autoDeploy: true
     envVars:
+      # Mongo lives inside Render's private network — reachable by service name
       - key: MONGO_URL
-        sync: false          # set this in the Render dashboard to your Atlas SRV string
+        value: mongodb://architecht-mongo:27017
       - key: DB_NAME
         value: architecht
+      # Pre-wired to the default frontend hostname produced by this blueprint
       - key: CORS_ORIGINS
-        sync: false          # set to your frontend URL, e.g. https://architecht-frontend.onrender.com
+        value: https://architecht-frontend.onrender.com
       - key: JWT_SECRET
-        generateValue: true  # Render will generate a strong random value once
+        generateValue: true
       - key: JWT_ALGORITHM
         value: HS256
       - key: JWT_EXPIRY_DAYS
         value: "30"
+      # ----- AWS Bedrock -----
       - key: AWS_BEARER_TOKEN_BEDROCK
-        sync: false          # paste your Bedrock API key in the Render dashboard
+        sync: false             # the ONLY secret you need to paste in the Render dashboard
       - key: AWS_REGION
-        value: us-east-1
+        value: ap-southeast-2   # Sydney
       - key: BEDROCK_MODEL_ID
-        value: us.anthropic.claude-sonnet-4-5-20250929-v1:0
-        # swap to haiku: us.anthropic.claude-haiku-4-5-20251022-v1:0
+        # Sonnet 4.5 via APAC cross-region inference profile (ap-southeast-2):
+        value: apac.anthropic.claude-sonnet-4-5-20250929-v1:0
+        # Swap to Haiku 4.5: apac.anthropic.claude-haiku-4-5-20251022-v1:0
       - key: PYTHON_VERSION
         value: "3.11.9"
 
@@ -41,14 +60,15 @@ services:
   - type: web
     name: architecht-frontend
     runtime: static
-    region: oregon
+    region: singapore
     rootDir: frontend
     buildCommand: corepack enable && yarn install --frozen-lockfile && yarn build
     staticPublishPath: build
     autoDeploy: true
     envVars:
+      # Pre-wired to the default backend hostname produced by this blueprint
       - key: REACT_APP_BACKEND_URL
-        sync: false          # set to the deployed backend URL, e.g. https://architecht-backend.onrender.com
+        value: https://architecht-backend.onrender.com
       - key: NODE_VERSION
         value: "20.11.0"
     routes:

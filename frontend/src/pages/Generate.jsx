@@ -6,10 +6,10 @@ import { UploadSimple, Code, Cube, Lightning, Warning, GlobeHemisphereWest, Arro
 import { toast } from "sonner";
 
 const REGIONS = [
+  "ap-southeast-2", "ap-southeast-1", "ap-south-1", "ap-northeast-1", "ap-northeast-2",
   "us-east-1", "us-east-2", "us-west-1", "us-west-2",
   "ca-central-1",
   "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
-  "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
   "sa-east-1", "me-south-1", "af-south-1",
 ];
 
@@ -19,7 +19,7 @@ export default function Generate() {
   const [xml, setXml] = useState("");
   const [title, setTitle] = useState("");
   const [fileName, setFileName] = useState("");
-  const [region, setRegion] = useState("us-east-1");
+  const [region, setRegion] = useState("ap-southeast-2");
   const [generating, setGenerating] = useState(false);
   const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [streamLog, setStreamLog] = useState([]);

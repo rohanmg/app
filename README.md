@@ -71,35 +71,37 @@ Open <http://localhost:3000> — register, then go to **New LLD**.
 
 ## Deploy to Render (one click via Blueprint)
 
-This repo ships with a [`render.yaml`](./render.yaml) blueprint. The blueprint provisions:
+This repo ships with a [`render.yaml`](./render.yaml) blueprint. The blueprint provisions **three** services in one go:
 
-1. **architecht-backend** (Python web service) — FastAPI on Render's Python runtime
-2. **architecht-frontend** (static site) — React build with SPA fallback rewrite
+1. **architecht-mongo** — self-hosted **MongoDB 7** via the free `docker.io/library/mongo:7` image, running as a Render *private service* with a 1 GB persistent disk. Reachable only inside your Render network at `mongodb://architecht-mongo:27017`.
+2. **architecht-backend** (Python web service) — FastAPI, pre-wired to the Mongo service above.
+3. **architecht-frontend** (static site) — React build with SPA fallback, pre-wired to call the backend at `https://architecht-backend.onrender.com`.
 
-> Render does **not** host MongoDB. Spin up a free **MongoDB Atlas M0** cluster first and have the SRV connection string ready.
+All three deploy to the **Singapore** Render region (closest to `ap-southeast-2`). AWS Bedrock and the pricing module both default to **`ap-southeast-2` (Sydney)** with the APAC cross-region inference profile `apac.anthropic.claude-sonnet-4-5-20250929-v1:0`.
+
+### The only thing you have to paste
+
+| Service               | Variable                     | Where it goes                                                    |
+| --------------------- | ---------------------------- | ---------------------------------------------------------------- |
+| `architecht-backend`  | `AWS_BEARER_TOKEN_BEDROCK`   | Render dashboard → architecht-backend → Environment              |
+
+Everything else (`MONGO_URL`, `CORS_ORIGINS`, `REACT_APP_BACKEND_URL`, `JWT_SECRET`) is set automatically by the blueprint.
 
 ### Steps
 
-1. **Push the repo to GitHub** (see "Git" below) and link it to Render.
-2. In the Render dashboard click **New → Blueprint**, point it at your repo, accept the blueprint.
-3. Set the **secret** env vars in the Render dashboard (the blueprint marks them `sync: false` so they aren't committed):
+1. Push this repo to GitHub.
+2. In Render: **New → Blueprint** → point at your repo → **Apply**.
+3. Once the dashboard shows all three services, paste your **Bedrock API key** into `architecht-backend → Environment → AWS_BEARER_TOKEN_BEDROCK` and click **Save & redeploy**.
+4. (Optional) If your default `*.onrender.com` hostnames differ from `architecht-backend` / `architecht-frontend`, update `CORS_ORIGINS` on the backend and `REACT_APP_BACKEND_URL` on the frontend, then redeploy.
 
-| Service               | Variable                     | Value                                                                  |
-| --------------------- | ---------------------------- | ---------------------------------------------------------------------- |
-| `architecht-backend`  | `MONGO_URL`                  | Your Atlas SRV string, e.g. `mongodb+srv://user:pass@cluster.../?...`  |
-| `architecht-backend`  | `AWS_BEARER_TOKEN_BEDROCK`   | Your Bedrock API key (starts with `bedrock-api-key-`)                  |
-| `architecht-backend`  | `CORS_ORIGINS`               | `https://architecht-frontend.onrender.com` (your frontend URL)         |
-| `architecht-frontend` | `REACT_APP_BACKEND_URL`      | `https://architecht-backend.onrender.com` (your backend URL)           |
-
-4. Hit **Apply**. First deploy takes ~5 minutes (backend `pip install` + frontend `yarn build`).
-5. After the backend is live, copy its URL into the frontend's `REACT_APP_BACKEND_URL` and redeploy the frontend.
+> Render's private services (`pserv`) require the **Starter** plan ($7/mo) — that's the only paid bit. The Mongo image itself is free.
 
 ### Swap to Haiku 4.5
 
 In the Render dashboard, edit `architecht-backend` → Environment, set:
 
 ```
-BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5-20251022-v1:0
+BEDROCK_MODEL_ID=apac.anthropic.claude-haiku-4-5-20251022-v1:0
 ```
 
 …and save. Next request uses Haiku (much faster, ~3× cheaper).
