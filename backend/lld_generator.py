@@ -1,12 +1,30 @@
-"""Claude-powered LLD generation."""
+"""Claude (via AWS Bedrock) LLD generation.
+
+Uses the standard Anthropic SDK pointed at Bedrock's Mantle endpoint so the
+provided `AWS_BEARER_TOKEN_BEDROCK` works as a simple bearer token (no SigV4).
+
+Model id is fully configurable via `BEDROCK_MODEL_ID`:
+  - Sonnet 4.5: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - Haiku 4.5:  us.anthropic.claude-haiku-4-5-20251022-v1:0
+"""
 import os
 import json
 from typing import AsyncIterator, Dict, List
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+from anthropic import AsyncAnthropic
 
-EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
-MODEL = "claude-sonnet-4-5-20250929"
+AWS_BEARER_TOKEN_BEDROCK = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+BEDROCK_MODEL_ID = os.environ.get(
+    "BEDROCK_MODEL_ID",
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+)
+
+_client = AsyncAnthropic(
+    api_key=AWS_BEARER_TOKEN_BEDROCK,
+    base_url=f"https://bedrock-mantle.{AWS_REGION}.api.aws/anthropic",
+)
+
 
 SYSTEM_PROMPT = """You are a Principal Cloud Architect generating a focused, production-grade Low-Level Design (LLD) from an AWS architecture diagram (draw.io).
 
@@ -67,7 +85,7 @@ Rules:
 
 
 def _build_user_prompt(title: str, pages: List[Dict], service_counts: Dict[str, int],
-                      cost_breakdown: List[Dict], total: float, xml_excerpt: str) -> str:
+                      cost_breakdown: List[Dict], total_cost: float, xml_excerpt: str) -> str:
     pages_summary = []
     for p in pages:
         services_on_page = sorted({n.get("service") for n in p["nodes"] if n.get("service")})
@@ -92,7 +110,7 @@ DRAWIO PAGES (multiple pages are usually zoom-ins of the same architecture — r
 
 COST BREAKDOWN — use this verbatim in the Cost section. Each item carries its `assumption` and `source` (curated vs live AWS bulk JSON):
 {json.dumps(cost_breakdown, indent=2)}
-Approximate total: ${total}/month
+Approximate total: ${total_cost}/month
 
 RAW XML EXCERPT (first 3000 chars — for label/grouping clues only):
 ```xml
@@ -111,17 +129,15 @@ async def generate_lld_stream(
     total_cost: float,
     xml_excerpt: str,
 ) -> AsyncIterator[str]:
-    """Stream markdown tokens from Claude."""
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"lld-{title[:40]}",
-        system_message=SYSTEM_PROMPT,
-    ).with_model("anthropic", MODEL).with_params(max_tokens=7000)
-
+    """Stream markdown tokens from Claude (Bedrock)."""
     user_prompt = _build_user_prompt(title, pages, service_counts, cost_breakdown, total_cost, xml_excerpt)
 
-    async for event in chat.stream_message(UserMessage(text=user_prompt)):
-        if isinstance(event, TextDelta):
-            yield event.content
-        elif isinstance(event, StreamDone):
-            break
+    async with _client.messages.stream(
+        model=BEDROCK_MODEL_ID,
+        max_tokens=7000,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_prompt}],
+    ) as stream:
+        async for text in stream.text_stream:
+            if text:
+                yield text
