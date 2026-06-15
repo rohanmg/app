@@ -110,6 +110,23 @@ export default function Generate() {
         toast.success("LLD generated");
         navigate(`/lld/${lldId}`);
       } else {
+        // Stream cut before 'done' — try to recover by title (backend persists in finally)
+        appendLog("» stream ended without 'done'. attempting recovery...");
+        // Give backend a moment to flush its insert
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          const { data } = await (await import("@/lib/api")).api.get(
+            `/lld/find-by-title?title=${encodeURIComponent(title)}`
+          );
+          if (data?.id) {
+            appendLog(`✓ recovered as ${data.id}`);
+            toast.success("LLD recovered");
+            navigate(`/lld/${data.id}`);
+            return;
+          }
+        } catch {
+          // fall through
+        }
         throw new Error("Generation did not complete");
       }
     } catch (err) {

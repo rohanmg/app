@@ -142,44 +142,60 @@ class TestDrawio:
 
 # ---------- LLD generation (SSE) ----------
 @pytest.fixture(scope="module")
-def generated_lld(headers):
-    """Run real LLM streaming and persist - shared across tests."""
+def generated_lld(s, headers):
+    """Run real LLM streaming and persist - shared across tests.
+    If preview ingress cuts the SSE stream before 'done', recover via find-by-title
+    (backend persists in asyncio.shield on CancelledError).
+    """
     url = f"{API}/lld/generate"
-    payload = {"title": "TEST_Architecht_LLD", "xml": SAMPLE_XML}
+    title = f"TEST_Architecht_LLD_{uuid.uuid4().hex[:6]}"
+    payload = {"title": title, "xml": SAMPLE_XML}
     events = []
     lld_id = None
     saw_meta = False
     delta_count = 0
     error_msg = None
 
-    with requests.post(url, json=payload, headers=headers, stream=True, timeout=240) as r:
-        assert r.status_code == 200, r.text
-        start = time.time()
-        for raw in r.iter_lines(decode_unicode=True):
-            if raw is None:
-                continue
-            if not raw or not raw.startswith("data:"):
-                continue
-            try:
-                ev = json.loads(raw[5:].strip())
-            except Exception:
-                continue
-            events.append(ev)
-            t = ev.get("type")
-            if t == "meta":
-                saw_meta = True
-                assert events[0]["type"] == "meta", "meta must come first"
-            elif t == "delta":
-                delta_count += 1
-            elif t == "error":
-                error_msg = ev.get("message")
-                break
-            elif t == "done":
-                lld_id = ev.get("lld_id")
-                break
-            if time.time() - start > 200:
-                pytest.fail("SSE stream exceeded 200s")
-    return {"lld_id": lld_id, "events": events, "saw_meta": saw_meta, "delta_count": delta_count, "error": error_msg}
+    try:
+        with requests.post(url, json=payload, headers=headers, stream=True, timeout=240) as r:
+            assert r.status_code == 200, r.text
+            start = time.time()
+            for raw in r.iter_lines(decode_unicode=True):
+                if raw is None:
+                    continue
+                if not raw or not raw.startswith("data:"):
+                    continue
+                try:
+                    ev = json.loads(raw[5:].strip())
+                except Exception:
+                    continue
+                events.append(ev)
+                t = ev.get("type")
+                if t == "meta":
+                    saw_meta = True
+                    assert events[0]["type"] == "meta", "meta must come first"
+                elif t == "delta":
+                    delta_count += 1
+                elif t == "error":
+                    error_msg = ev.get("message")
+                    break
+                elif t == "done":
+                    lld_id = ev.get("lld_id")
+                    break
+                if time.time() - start > 200:
+                    pytest.fail("SSE stream exceeded 200s")
+    except (requests.exceptions.ChunkedEncodingError, requests.exceptions.ConnectionError):
+        # Ingress cut the stream — backend should still have persisted via shield
+        pass
+
+    # Recovery: if no 'done' event seen, wait briefly then query find-by-title
+    if not lld_id and not error_msg:
+        time.sleep(2.0)
+        r = s.get(f"{API}/lld/find-by-title", params={"title": title}, headers=headers)
+        if r.status_code == 200:
+            lld_id = r.json()["id"]
+
+    return {"lld_id": lld_id, "events": events, "saw_meta": saw_meta, "delta_count": delta_count, "error": error_msg, "title": title}
 
 
 class TestLLDGenerate:
@@ -187,7 +203,9 @@ class TestLLDGenerate:
         assert generated_lld["error"] is None, f"Stream error: {generated_lld['error']}"
         assert generated_lld["saw_meta"] is True
         assert generated_lld["delta_count"] > 0, "Expected at least one delta from LLM"
-        assert generated_lld["lld_id"], "Expected lld_id in done event"
+        # lld_id may come from 'done' event or recovery via find-by-title (both validate
+        # backend persistence via asyncio.shield on CancelledError)
+        assert generated_lld["lld_id"], "Expected lld_id (via done event or find-by-title recovery)"
 
     def test_meta_payload(self, generated_lld):
         meta = generated_lld["events"][0]
@@ -207,7 +225,7 @@ class TestLLDCrud:
         r = s.get(f"{API}/lld/{generated_lld['lld_id']}", headers=headers)
         assert r.status_code == 200
         doc = r.json()
-        assert doc["title"] == "TEST_Architecht_LLD"
+        assert doc["title"] == generated_lld["title"]
         assert len(doc["markdown"]) > 100
         assert doc["estimated_monthly_cost_usd"] > 0
         assert len(doc["pages"]) == 2
@@ -237,6 +255,26 @@ class TestLLDCrud:
         # Delete should 404
         r3 = s.delete(f"{API}/lld/{generated_lld['lld_id']}", headers=other_headers)
         assert r3.status_code == 404
+
+    def test_find_by_title_success(self, s, headers, generated_lld):
+        r = s.get(f"{API}/lld/find-by-title", params={"title": generated_lld["title"]}, headers=headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["id"] == generated_lld["lld_id"]
+        assert "created_at" in body
+
+    def test_find_by_title_404(self, s, headers):
+        r = s.get(f"{API}/lld/find-by-title", params={"title": "TEST_does_not_exist_xyz"}, headers=headers)
+        assert r.status_code == 404
+
+    def test_find_by_title_user_isolation(self, s, generated_lld):
+        email = f"iso_{uuid.uuid4().hex[:8]}@architecht.dev"
+        r = s.post(f"{API}/auth/register", json={"email": email, "password": "pw123456", "name": "Iso"})
+        assert r.status_code == 200
+        other_headers = {"Authorization": f"Bearer {r.json()['token']}"}
+        # Other user should NOT find the primary user's LLD by title
+        r2 = s.get(f"{API}/lld/find-by-title", params={"title": generated_lld["title"]}, headers=other_headers)
+        assert r2.status_code == 404
 
     def test_delete(self, s, headers, generated_lld):
         r = s.delete(f"{API}/lld/{generated_lld['lld_id']}", headers=headers)

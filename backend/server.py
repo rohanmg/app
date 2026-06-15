@@ -1,6 +1,8 @@
 import os
 import json
+import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -125,6 +127,32 @@ async def lld_generate(payload: GenerateRequest, user_id: str = Depends(get_curr
         yield f"data: {json.dumps(meta)}\n\n"
 
         accumulated: List[str] = []
+        saved_id: Optional[str] = None
+        gen_error: Optional[str] = None
+        last_heartbeat = time.time()
+
+        async def persist_now() -> str:
+            markdown = "".join(accumulated)
+            lld = LLD(
+                user_id=user_id,
+                title=payload.title,
+                xml=payload.xml,
+                markdown=markdown,
+                services=[
+                    {"name": s["name"], "category": s["category"], "count": s["count"], "monthly_cost_usd": s["monthly_cost_usd"]}
+                    for s in cost_items
+                ],
+                pages=[
+                    {"id": p["id"], "name": p["name"], "node_count": len(p["nodes"]), "edge_count": len(p["edges"])}
+                    for p in parsed["pages"]
+                ],
+                layout={"pages": pages_for_layout},
+                estimated_monthly_cost_usd=total,
+            )
+            # shield so client disconnect mid-await still writes to mongo
+            await asyncio.shield(llds_col.insert_one(lld.model_dump()))
+            return lld.id
+
         try:
             async for chunk in generate_lld_stream(
                 title=payload.title,
@@ -136,30 +164,34 @@ async def lld_generate(payload: GenerateRequest, user_id: str = Depends(get_curr
             ):
                 accumulated.append(chunk)
                 yield f"data: {json.dumps({'type': 'delta', 'content': chunk})}\n\n"
+                # heartbeat every ~8s to keep proxy from idling out the stream
+                if time.time() - last_heartbeat > 8:
+                    yield ": keepalive\n\n"
+                    last_heartbeat = time.time()
+        except asyncio.CancelledError:
+            # client went away — still try to persist so the work isn't lost
+            if accumulated:
+                try:
+                    saved_id = await persist_now()
+                    logger.info("Persisted LLD %s after client disconnect", saved_id)
+                except Exception:
+                    logger.exception("Persist on cancel failed")
+            raise
         except Exception as e:
             logger.exception("LLD generation failed")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            gen_error = str(e)
+
+        if gen_error is not None:
+            yield f"data: {json.dumps({'type': 'error', 'message': gen_error})}\n\n"
             return
 
-        markdown = "".join(accumulated)
-        lld = LLD(
-            user_id=user_id,
-            title=payload.title,
-            xml=payload.xml,
-            markdown=markdown,
-            services=[
-                {"name": s["name"], "category": s["category"], "count": s["count"], "monthly_cost_usd": s["monthly_cost_usd"]}
-                for s in cost_items
-            ],
-            pages=[
-                {"id": p["id"], "name": p["name"], "node_count": len(p["nodes"]), "edge_count": len(p["edges"])}
-                for p in parsed["pages"]
-            ],
-            layout={"pages": pages_for_layout},
-            estimated_monthly_cost_usd=total,
-        )
-        await llds_col.insert_one(lld.model_dump())
-        yield f"data: {json.dumps({'type': 'done', 'lld_id': lld.id})}\n\n"
+        if not accumulated:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Empty LLM response'})}\n\n"
+            return
+
+        if saved_id is None:
+            saved_id = await persist_now()
+        yield f"data: {json.dumps({'type': 'done', 'lld_id': saved_id})}\n\n"
 
     return StreamingResponse(
         event_stream(),
@@ -183,6 +215,19 @@ async def list_llds(user_id: str = Depends(get_current_user_id)):
         )
         for it in items
     ]
+
+
+@api.get("/lld/find-by-title")
+async def find_by_title(title: str, user_id: str = Depends(get_current_user_id)):
+    """Recovery endpoint: returns the most recent LLD id with this title for the user."""
+    doc = await llds_col.find_one(
+        {"user_id": user_id, "title": title}, {"_id": 0, "id": 1, "created_at": 1},
+        sort=[("created_at", -1)],
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="No LLD with that title")
+    return {"id": doc["id"], "created_at": doc["created_at"]}
+
 
 
 @api.get("/lld/{lld_id}", response_model=LLD)

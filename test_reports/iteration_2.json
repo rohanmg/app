@@ -1,0 +1,41 @@
+{
+  "summary": "Re-test PASSED. Backend: 20/20 pytest pass (17 original + 3 new for /api/lld/find-by-title) in ~65s incl. real Claude Sonnet 4.5 streaming. Frontend E2E SSE generation flow now succeeds end-to-end: login → /generate → paste XML + title 'UI Recovery Test 1' → click Generate LLD → navigation to /lld/:id within ~80s, then full viewer renders (4 service pills, 4 diagram nodes, 6 TOC items, all 4 export/nav buttons present, SVG diagram, pill+node click highlighting works, .md and .docx downloads succeed with correct filenames). The asyncio.shield + heartbeat + find-by-title recovery contract is confirmed working: even when the preview ingress cuts the SSE stream mid-flight, the LLD is persisted server-side and the frontend/test client recovers via GET /api/lld/find-by-title.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: there is a benign React dev console warning 'React does not recognize the `%s` prop on a DOM element' on /lld/:id — appears to be a markdown/codeblock prop spread issue (likely a code component receiving `inline` prop on a native <code> element). Not a functional bug but worth cleaning up.",
+    "Login redirects to /dashboard, not /vault as the back-vault testid implies. The dashboard does show the vault content so this is cosmetic naming only — consider unifying."
+  ],
+  "critical_code_review_comments": [
+    "server.py: shield/heartbeat fix is correct and now persists the LLD even when the client disconnects mid-stream. find-by-title is correctly registered BEFORE /lld/{lld_id} (no route-shadowing).",
+    "server.py find-by-title: returns 404 for non-owner queries (user_id is enforced in the filter) — user isolation verified by test_find_by_title_user_isolation.",
+    "Generate.jsx recovery path: 1.5s sleep before find-by-title is acceptable; consider extending to 3s as a safety margin for slower clients and add 1 retry — current 1.5s worked in this test but on cold runs could race the shielded insert.",
+    "Heartbeat ': keepalive\\n\\n' is emitted only between LLM chunks. If a single LLM chunk takes >8s, the heartbeat will still wait for the next chunk. Consider using an asyncio.Task that emits keepalives on a timer independent of the LLM yield cadence — only needed if ingress idle-timeout is < LLM inter-chunk latency.",
+    "lld_generator.py / cost_estimator.py not changed; previous tests still validate them.",
+    "Models still leak full XML on GET /api/lld/:id — fine for now, but consider an opt-in `?include=xml` param if XML grows."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 pytest)",
+    "frontend": "100% (login → /generate → SSE → /lld/:id viewer with pills/nodes/TOC/exports all working)"
+  },
+  "test_credentials": "test@architecht.dev / testpass123 (works)",
+  "seed_data_creation": "Pytest creates and tears down its own LLD with unique title TEST_Architecht_LLD_<6hex>. Frontend run created an LLD titled 'UI Recovery Test 1' (id c361c14f-3b4a-4d82-996f-b436829b25da) for test@architecht.dev — left in the DB for manual inspection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Both backend and frontend are GREEN. Backend pytest suite now has 20 tests including find-by-title (success/404/user-isolation) and is robust to SSE-cut by recovering through find-by-title (mirrors the frontend flow). Re-run with: `python -m pytest /app/backend/tests/backend_test.py -v` (~65s due to real Claude Sonnet 4.5 call). The full UI E2E /generate → /lld/:id viewer flow is verified via Playwright — 4 pills (rds/ec2/s3/lambda), 4 diagram-node-* nodes, 6 toc-* items, export-md, export-docx, export-pdf, back-vault all wired. Pill click highlights the matching diagram node (orange border on EC2 node visible in screenshot when EC2 pill clicked).",
+  "rca of the issue": "Iteration 1 RCA was correct: preview ingress was cutting the SSE before the 'done' event, and persistence happened only at the end of the stream → no LLD saved. Iteration 2 fix is verified working: (a) server.py wraps insert_one in asyncio.shield inside a try/except asyncio.CancelledError, so on disconnect the doc is still written; (b) GET /api/lld/find-by-title returns the most recent owned LLD by title with 404 for other users; (c) Generate.jsx, when the reader finishes without a 'done' event, sleeps 1.5s then queries find-by-title and navigates. End-to-end verified: backend pytest confirms persistence-on-cancel (even when its requests stream gets a ChunkedEncodingError, the LLD is recoverable via find-by-title), and the browser flow navigated to /lld/:id successfully."
+}
