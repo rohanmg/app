@@ -1,0 +1,114 @@
+{
+  "project_name": "Architecht: Draw.io to LLD Generator",
+  "theme_and_archetype": {
+    "theme": "dark",
+    "archetype": "Archetype 4 (Swiss & High-Contrast)",
+    "description": "A developer-grade, brutalist, precision-oriented UI. Inspired by Vercel/Linear but pushed further with 'exposed skeleton' grid borders, high-contrast monochrome tones, and functional accent colors to signal blockers and architecture components. It avoids generic tech gradients in favor of sharp, definitive styling."
+  },
+  "typography": {
+    "fonts": {
+      "headings": "Chivo",
+      "body": "Inter",
+      "mono": "JetBrains Mono"
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl tracking-tighter font-black",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-bold",
+      "h3": "text-xl sm:text-2xl font-semibold",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed",
+      "small_labels": "text-xs tracking-[0.2em] uppercase font-mono"
+    },
+    "rules": [
+      "Use JetBrains Mono for all code snippets, AWS service names, OSI layers, IP addresses, and cost calculations.",
+      "Never use Inter for headings. Keep headings stark and tightly tracked.",
+      "Avoid bold body text unless it's a critical label; use weight contrast instead."
+    ]
+  },
+  "colors": {
+    "background": {
+      "main": "#09090B",
+      "surface_1": "#18181B",
+      "surface_2": "#27272A",
+      "glass": "bg-black/60 backdrop-blur-xl"
+    },
+    "text": {
+      "primary": "#FAFAFA",
+      "secondary": "#A1A1AA",
+      "disabled": "#52525B"
+    },
+    "accents": {
+      "primary": "#FFFFFF",
+      "primary_hover": "#E4E4E7",
+      "danger": "#FF3B30",
+      "success": "#34C759",
+      "aws_highlight": "#F59E0B"
+    },
+    "borders": {
+      "default": "#27272A",
+      "focus": "#FFFFFF"
+    },
+    "rules": [
+      "Use the 'Tinted Grey' rule: Zinc palette is preferred over raw Grays to maintain a subtle cool temperature.",
+      "Strict monochrome usage: 95% of the UI should be black, white, and zinc. Color exists ONLY for functional status (red = blocker/error, green = healthy, amber = AWS service/cost alert).",
+      "Borders must be sharp (1px solid). No soft drop shadows."
+    ]
+  },
+  "layout_and_spacing": {
+    "system": "Tailwind standard scale, utilizing generous spacing (p-6, p-8) to prevent density fatigue in dense technical documents.",
+    "patterns": {
+      "dashboard_grid": "MODE B: The 'Control Room' Grid. Dense and structured. grid-cols-1 md:grid-cols-3 lg:grid-cols-4 with gap-6. Exposed grid borders (border-r border-b border-zinc-800).",
+      "lld_viewer_split": "Asymmetric 2-pane layout. Left pane (Diagram Viewer): col-span-5. Right pane (LLD Document Reader): col-span-7. Left pane has a subtle dot-grid background."
+    },
+    "rules": [
+      "No rounded corners greater than rounded-md (6px) to maintain the brutalist, architectural feel.",
+      "Use border-collapse techniques to create the 'exposed skeleton' grid look on tables and feature lists."
+    ]
+  },
+  "surfaces_and_micro_themes": {
+    "cards": "Flat background (zinc-900), 1px solid border (zinc-800), absolutely no shadow. Hover state: border becomes zinc-600.",
+    "buttons": "Square or rounded-sm. Primary: bg-white text-black hover:bg-zinc-200. Secondary: bg-transparent border border-zinc-800 text-zinc-300 hover:border-zinc-500 hover:text-white.",
+    "pills_and_tags": "Used for AWS services. font-mono text-xs border border-zinc-700 bg-zinc-900/50 px-2 py-1.",
+    "diagram_viewer": "Must have a 'Terminal/Grid' retro-futuristic backdrop. A repeating SVG dot pattern or grid lines on pure black to simulate a canvas."
+  },
+  "navigation": {
+    "header": "Sticky header (z-50) using the 'Crystal Glass' variant (bg-black/60 backdrop-blur-xl border-b border-zinc-800). Must contain Logo, Project Name, and Export CTA.",
+    "sidebar": "Collapsible left sidebar for the LLD Table of Contents (TOC). Uses strict progressive disclosure. Links must be small, tightly spaced, and hover to white."
+  },
+  "components": {
+    "upload_zone": "Large dotted/dashed border area (border-zinc-700). Must include an icon, clear instructions, and support drag-and-drop. Hover state increases border brightness to zinc-400.",
+    "live_progress": "Terminal-style streaming text window while Claude generates the LLD. JetBrains Mono, text-sm, text-zinc-400 with the latest line in text-white.",
+    "markdown_viewer": "Utilize `prose prose-invert`. Customize prose styles: prose-headings:font-chivo prose-a:text-white prose-a:underline prose-a:decoration-zinc-700 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800.",
+    "aws_service_pills": "Interactive tokens within the text. Clicking them should highlight the corresponding node in the Draw.io diagram view.",
+    "icons": "Use Phosphor Icons (@phosphor-icons/react) for a clean, sharp, duotone/regular weight look that fits developer tools."
+  },
+  "interactions_and_motion": {
+    "transitions": "Fast and snappy. `transition-all duration-150 ease-out`. No slow, sweeping animations.",
+    "diagram_sync": "Clicking a node in the diagram must trigger a smooth scroll (`scroll-behavior: smooth`) to the relevant OSI/Networking/IAM section in the Markdown viewer.",
+    "hover_states": "All interactive elements must shift contrast. E.g., text-zinc-400 -> text-white."
+  },
+  "accessibility": {
+    "testing": "All interactive elements MUST include `data-testid` attributes (e.g., `data-testid=\"upload-xml-button\"`, `data-testid=\"export-pdf-cta\"`).",
+    "contrast": "Ensure minimum 4.5:1 for all text. The Zinc 400 on Zinc 950 provides sufficient contrast for secondary text.",
+    "focus": "focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black."
+  },
+  "assets": {
+    "images": {
+      "background_texture": {
+        "url": "https://images.unsplash.com/photo-1568607184887-647b905c0966?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwxfHxkYXJrJTIwbW9ub2Nocm9tZSUyMGdyaWQlMjB0ZXh0dXJlfGVufDB8fHx8MTc4MTUzMDA0MXww&ixlib=rb-4.1.0&q=85",
+        "description": "Dark monochrome matrix texture. Use as a very low opacity (5-10%) overlay in the Hero or Empty States to give a raw data feel.",
+        "category": "background_texture"
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly adhere to the dark theme and Swiss & High-Contrast archetype. Do not introduce stray colors like purple or teal.",
+    "Implement the UI using raw Tailwind HTML for layout structures, but utilize customized Shadcn UI components for complex interactions (Dropdowns, Tabs, Dialogs).",
+    "Install and use `@phosphor-icons/react` for icons.",
+    "Use `framer-motion` only for micro-interactions (like the live streaming progress bar or tab switching). Keep it minimal.",
+    "The Diagram viewer MUST be sticky on the left while the document scrolls on the right.",
+    "Use `react-markdown` or similar to render the LLD, ensuring the custom prose classes are applied.",
+    "Generate realistic mock data if the backend generation isn't hooked up yet.",
+    "Ensure all buttons and inputs have the `data-testid` attribute."
+  ]
+}
