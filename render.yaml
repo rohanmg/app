@@ -36,6 +36,8 @@ services:
         sync: false
       - key: AWS_SESSION_TOKEN
         sync: false
+      - key: BEDROCK_API_KEY
+        sync: false             # Optional direct Bedrock API key for runtime auth
       - key: AWS_REGION
         value: ap-southeast-2   # Sydney
       - key: BEDROCK_MODEL_ID

@@ -43,7 +43,7 @@ Turn any AWS architecture diagram drawn in **draw.io** into a deep, opinionated 
 - Python 3.11+
 - Node 20+ and Yarn 1.22+
 - MongoDB running locally on `mongodb://localhost:27017` (or use Atlas)
-- AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN`) with Bedrock runtime access in the chosen region.
+- Either a direct Bedrock runtime API key via `BEDROCK_API_KEY`, or AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN`) with Bedrock runtime access in the chosen region.
 
 ### Backend
 
@@ -52,7 +52,7 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# edit .env — set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and any other values
+# edit .env — set BEDROCK_API_KEY or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and any other values
 uvicorn server:app --reload --host 0.0.0.0 --port 8001
 ```
 
@@ -83,7 +83,7 @@ All three deploy to the **Singapore** Render region (closest to `ap-southeast-2`
 
 | Service               | Variable                     | Where it goes                                                    |
 | --------------------- | ---------------------------- | ---------------------------------------------------------------- |
-| `architecht-backend`  | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`   | Render dashboard → architecht-backend → Environment              |
+| `architecht-backend`  | `BEDROCK_API_KEY` or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`   | Render dashboard → architecht-backend → Environment              |
 
 Everything else (`MONGO_URL`, `CORS_ORIGINS`, `REACT_APP_BACKEND_URL`, `JWT_SECRET`) is set automatically by the blueprint.
 
@@ -91,7 +91,7 @@ Everything else (`MONGO_URL`, `CORS_ORIGINS`, `REACT_APP_BACKEND_URL`, `JWT_SECR
 
 1. Push this repo to GitHub.
 2. In Render: **New → Blueprint** → point at your repo → **Apply**.
-3. Once the dashboard shows all three services, paste your **AWS credentials** into `architecht-backend → Environment → AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` if required), then click **Save & redeploy**.
+3. Once the dashboard shows all three services, paste your **Bedrock runtime credentials** into `architecht-backend → Environment`: either `BEDROCK_API_KEY`, or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` if required), then click **Save & redeploy**.
 4. (Optional) If your default `*.onrender.com` hostnames differ from `architecht-backend` / `architecht-frontend`, update `CORS_ORIGINS` on the backend and `REACT_APP_BACKEND_URL` on the frontend, then redeploy.
 
 > Render's private services (`pserv`) require the **Starter** plan ($7/mo) — that's the only paid bit. The Mongo image itself is free.

@@ -1,8 +1,8 @@
 """Claude (via AWS Bedrock Runtime) LLD generation.
 
-Uses AWS Bedrock Runtime by default with standard AWS credentials. Mantle is
-supported only when `USE_BEDROCK_MANTLE=true` is explicitly set in the backend
-environment.
+Uses AWS Bedrock Runtime by default with a direct Bedrock API key or standard
+AWS credentials. Mantle is supported only when `USE_BEDROCK_MANTLE=true` is
+explicitly set in the backend environment.
 
 Model id is fully configurable via `BEDROCK_MODEL_ID`:
   - Sonnet 4.5: us.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -13,16 +13,20 @@ import os
 import json
 from typing import AsyncIterator, Dict, List
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+import requests
+from requests import Request, Session
+from requests.exceptions import RequestException
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 BEDROCK_MODEL_ID = os.environ.get(
     "BEDROCK_MODEL_ID",
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
 )
-
-BEDROCK_RUNTIME_CLIENT = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+BEDROCK_API_KEY = os.environ.get("BEDROCK_API_KEY", "")
+BEDROCK_RUNTIME_URL = os.environ.get(
+    "BEDROCK_RUNTIME_URL",
+    f"https://bedrock-runtime.{AWS_REGION}.api.aws",
+)
 
 USE_BEDROCK_MANTLE = os.environ.get("USE_BEDROCK_MANTLE", "false").lower() in ("1", "true", "yes")
 if USE_BEDROCK_MANTLE:
@@ -147,17 +151,63 @@ def _chunk_text(text: str, chunk_size: int = 512):
         yield text[i : i + chunk_size]
 
 
-def _invoke_bedrock(prompt: str) -> str:
-    try:
-        response = BEDROCK_RUNTIME_CLIENT.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({"inputText": prompt}).encode("utf-8"),
+def _build_bedrock_headers() -> Dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if BEDROCK_API_KEY:
+        if BEDROCK_API_KEY.lower().startswith("bearer "):
+            headers["Authorization"] = BEDROCK_API_KEY
+        else:
+            headers["x-api-key"] = BEDROCK_API_KEY
+    return headers
+
+
+def _sign_request(prepared: requests.PreparedRequest):
+    aws_access_key_id = os.environ.get("AWS_ACCESS_KEY_ID")
+    aws_secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    aws_session_token = os.environ.get("AWS_SESSION_TOKEN")
+
+    if not aws_access_key_id or not aws_secret_access_key:
+        raise RuntimeError(
+            "AWS credentials are required for Bedrock runtime signing when BEDROCK_API_KEY is not set."
         )
-        return _parse_bedrock_response(response["body"].read())
-    except (BotoCoreError, ClientError) as exc:
-        raise RuntimeError(f"Bedrock runtime invocation failed: {exc}") from exc
+
+    try:
+        from botocore.auth import SigV4Auth
+        from botocore.credentials import Credentials
+    except ImportError as exc:
+        raise RuntimeError(
+            "botocore is required for AWS SigV4 request signing. Install botocore in your environment."
+        ) from exc
+
+    creds = Credentials(aws_access_key_id, aws_secret_access_key, aws_session_token)
+    SigV4Auth(creds, "bedrock-runtime", AWS_REGION).add_auth(prepared)
+
+
+def _invoke_bedrock(prompt: str) -> str:
+    url = f"{BEDROCK_RUNTIME_URL}/invoke-model"
+    payload = json.dumps({"modelId": BEDROCK_MODEL_ID, "inputText": prompt}).encode("utf-8")
+    headers = _build_bedrock_headers()
+    request = Request("POST", url, data=payload, headers=headers)
+    prepared = request.prepare()
+
+    if not BEDROCK_API_KEY:
+        _sign_request(prepared)
+
+    session = Session()
+    try:
+        response = session.send(prepared, timeout=90)
+    except RequestException as exc:
+        raise RuntimeError(f"Bedrock runtime request failed: {exc}") from exc
+
+    if not response.ok:
+        raise RuntimeError(
+            f"Bedrock runtime invocation failed ({response.status_code}): {response.text}"
+        )
+
+    return _parse_bedrock_response(response.content)
 
 
 async def generate_lld_stream(
