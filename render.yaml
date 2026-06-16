@@ -17,7 +17,7 @@ services:
     envVars:
       # Paste your MongoDB Atlas cloud string directly in the Render dashboard
       - key: MONGO_URL
-        value: "mongodb+srv://rgadagi_db_user:<db_password>@cluster0.rob1zzt.mongodb.net/?appName=Cluster0"             
+        value: "mongodb+srv://rgadagi_db_user:mypassword123@cluster0.rob1zzt.mongodb.net/?appName=Cluster0"             
       - key: DB_NAME
         value: architecht
       # Pre-wired to the default frontend hostname produced by this blueprint
@@ -30,8 +30,12 @@ services:
       - key: JWT_EXPIRY_DAYS
         value: "30"
       # ----- AWS Bedrock -----
-      - key: AWS_BEARER_TOKEN_BEDROCK
-        sync: false             # Paste your AWS Bedrock key in the dashboard
+      - key: AWS_ACCESS_KEY_ID
+        sync: false             # Paste your AWS credentials in the dashboard
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_SESSION_TOKEN
+        sync: false
       - key: AWS_REGION
         value: ap-southeast-2   # Sydney
       - key: BEDROCK_MODEL_ID

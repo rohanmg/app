@@ -1,29 +1,38 @@
-"""Claude (via AWS Bedrock) LLD generation.
+"""Claude (via AWS Bedrock Runtime) LLD generation.
 
-Uses the standard Anthropic SDK pointed at Bedrock's Mantle endpoint so the
-provided `AWS_BEARER_TOKEN_BEDROCK` works as a simple bearer token (no SigV4).
+Uses AWS Bedrock Runtime by default with standard AWS credentials. Mantle is
+supported only when `USE_BEDROCK_MANTLE=true` is explicitly set in the backend
+environment.
 
 Model id is fully configurable via `BEDROCK_MODEL_ID`:
   - Sonnet 4.5: us.anthropic.claude-sonnet-4-5-20250929-v1:0
   - Haiku 4.5:  us.anthropic.claude-haiku-4-5-20251022-v1:0
 """
+import asyncio
 import os
 import json
 from typing import AsyncIterator, Dict, List
 
-from anthropic import AsyncAnthropic
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
-AWS_BEARER_TOKEN_BEDROCK = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 BEDROCK_MODEL_ID = os.environ.get(
     "BEDROCK_MODEL_ID",
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
 )
 
-_client = AsyncAnthropic(
-    api_key=AWS_BEARER_TOKEN_BEDROCK,
-    base_url=f"https://bedrock-mantle.{AWS_REGION}.api.aws/anthropic",
-)
+BEDROCK_RUNTIME_CLIENT = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+
+USE_BEDROCK_MANTLE = os.environ.get("USE_BEDROCK_MANTLE", "false").lower() in ("1", "true", "yes")
+if USE_BEDROCK_MANTLE:
+    from anthropic import AsyncAnthropic
+
+    AWS_BEARER_TOKEN_BEDROCK = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "")
+    _client = AsyncAnthropic(
+        api_key=AWS_BEARER_TOKEN_BEDROCK,
+        base_url=f"https://bedrock-mantle.{AWS_REGION}.api.aws/anthropic",
+    )
 
 
 SYSTEM_PROMPT = """You are a Principal Cloud Architect generating a focused, production-grade Low-Level Design (LLD) from an AWS architecture diagram (draw.io).
@@ -121,6 +130,36 @@ Produce the focused LLD now. Markdown only. No preamble. Keep it under ~2200 wor
 """
 
 
+def _parse_bedrock_response(body: bytes) -> str:
+    try:
+        text = body.decode("utf-8")
+    except Exception:
+        return ""
+    try:
+        payload = json.loads(text)
+        return payload.get("outputText") or payload.get("response") or payload.get("text") or text
+    except json.JSONDecodeError:
+        return text
+
+
+def _chunk_text(text: str, chunk_size: int = 512):
+    for i in range(0, len(text), chunk_size):
+        yield text[i : i + chunk_size]
+
+
+def _invoke_bedrock(prompt: str) -> str:
+    try:
+        response = BEDROCK_RUNTIME_CLIENT.invoke_model(
+            modelId=BEDROCK_MODEL_ID,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({"inputText": prompt}).encode("utf-8"),
+        )
+        return _parse_bedrock_response(response["body"].read())
+    except (BotoCoreError, ClientError) as exc:
+        raise RuntimeError(f"Bedrock runtime invocation failed: {exc}") from exc
+
+
 async def generate_lld_stream(
     title: str,
     pages: List[Dict],
@@ -129,15 +168,20 @@ async def generate_lld_stream(
     total_cost: float,
     xml_excerpt: str,
 ) -> AsyncIterator[str]:
-    """Stream markdown tokens from Claude (Bedrock)."""
+    """Stream markdown tokens from Bedrock Runtime."""
     user_prompt = _build_user_prompt(title, pages, service_counts, cost_breakdown, total_cost, xml_excerpt)
 
-    async with _client.messages.stream(
-        model=BEDROCK_MODEL_ID,
-        max_tokens=7000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
-    ) as stream:
-        async for text in stream.text_stream:
-            if text:
-                yield text
+    if USE_BEDROCK_MANTLE:
+        async with _client.messages.stream(
+            model=BEDROCK_MODEL_ID,
+            max_tokens=7000,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+        ) as stream:
+            async for text in stream.text_stream:
+                if text:
+                    yield text
+    else:
+        output = await asyncio.to_thread(_invoke_bedrock, user_prompt)
+        for chunk in _chunk_text(output):
+            yield chunk

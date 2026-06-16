@@ -10,7 +10,7 @@ Turn any AWS architecture diagram drawn in **draw.io** into a deep, opinionated 
 
 - 🔐 Email/password auth (JWT)
 - 📥 Upload `.drawio` / `.xml` **or** paste XML directly (multi-page tabs reconciled)
-- 🧠 LLD generation streamed live from **Claude Sonnet 4.5** via the AWS **Bedrock Mantle** bearer-token endpoint (swap to Haiku 4.5 via one env var)
+- 🧠 LLD generation streamed live from **Claude Sonnet 4.5** via the AWS **Bedrock Runtime** endpoint (swap to Haiku 4.5 via one env var)
 - 🗺️ Interactive split-pane viewer — click any AWS node in the diagram or any pill to jump to its section
 - 💸 Curated AWS pricing table + 18 region multipliers + on-demand refresh from the **public AWS Bulk Pricing JSON** (no AWS keys needed)
 - 🔗 One-click **public, read-only share links** per LLD (revocable)
@@ -25,7 +25,7 @@ Turn any AWS architecture diagram drawn in **draw.io** into a deep, opinionated 
 ┌────────────┐   HTTPS    ┌────────────────────────┐
 │  React 19  │ ─────────► │  FastAPI + Motor + LLM │
 │  (static)  │            │     anthropic SDK →    │
-│            │            │  Bedrock Mantle (SSE)  │
+│            │            │  Bedrock Runtime (SSE)  │
 └────────────┘            └───────────┬────────────┘
                                       │
                                       ▼
@@ -43,7 +43,7 @@ Turn any AWS architecture diagram drawn in **draw.io** into a deep, opinionated 
 - Python 3.11+
 - Node 20+ and Yarn 1.22+
 - MongoDB running locally on `mongodb://localhost:27017` (or use Atlas)
-- An **AWS Bedrock API key** with access to the chosen Claude model in the chosen region. ([Generate one →](https://console.aws.amazon.com/bedrock/home#/api-keys))
+- AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN`) with Bedrock runtime access in the chosen region.
 
 ### Backend
 
@@ -52,7 +52,7 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# edit .env — set AWS_BEARER_TOKEN_BEDROCK and any other values
+# edit .env — set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and any other values
 uvicorn server:app --reload --host 0.0.0.0 --port 8001
 ```
 
@@ -83,7 +83,7 @@ All three deploy to the **Singapore** Render region (closest to `ap-southeast-2`
 
 | Service               | Variable                     | Where it goes                                                    |
 | --------------------- | ---------------------------- | ---------------------------------------------------------------- |
-| `architecht-backend`  | `AWS_BEARER_TOKEN_BEDROCK`   | Render dashboard → architecht-backend → Environment              |
+| `architecht-backend`  | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`   | Render dashboard → architecht-backend → Environment              |
 
 Everything else (`MONGO_URL`, `CORS_ORIGINS`, `REACT_APP_BACKEND_URL`, `JWT_SECRET`) is set automatically by the blueprint.
 
@@ -91,7 +91,7 @@ Everything else (`MONGO_URL`, `CORS_ORIGINS`, `REACT_APP_BACKEND_URL`, `JWT_SECR
 
 1. Push this repo to GitHub.
 2. In Render: **New → Blueprint** → point at your repo → **Apply**.
-3. Once the dashboard shows all three services, paste your **Bedrock API key** into `architecht-backend → Environment → AWS_BEARER_TOKEN_BEDROCK` and click **Save & redeploy**.
+3. Once the dashboard shows all three services, paste your **AWS credentials** into `architecht-backend → Environment → AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` if required), then click **Save & redeploy**.
 4. (Optional) If your default `*.onrender.com` hostnames differ from `architecht-backend` / `architecht-frontend`, update `CORS_ORIGINS` on the backend and `REACT_APP_BACKEND_URL` on the frontend, then redeploy.
 
 > Render's private services (`pserv`) require the **Starter** plan ($7/mo) — that's the only paid bit. The Mongo image itself is free.
