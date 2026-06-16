@@ -17,12 +17,12 @@ services:
     envVars:
       # Paste your MongoDB Atlas cloud string directly in the Render dashboard
       - key: MONGO_URL
-        sync: false             
+        value: "mongodb+srv://rgadagi_db_user:<db_password>@cluster0.rob1zzt.mongodb.net/?appName=Cluster0"             
       - key: DB_NAME
         value: architecht
       # Pre-wired to the default frontend hostname produced by this blueprint
       - key: CORS_ORIGINS
-        value: https://onrender.com
+        value: https://architecht-frontend.onrender.com
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_ALGORITHM
@@ -35,7 +35,7 @@ services:
       - key: AWS_REGION
         value: ap-southeast-2   # Sydney
       - key: BEDROCK_MODEL_ID
-        value: apac.anthropic.claude-sonnet-4-5-20250929-v1:0
+        value: au.anthropic.claude-sonnet-4-6
       - key: PYTHON_VERSION
         value: "3.11.9"
 
@@ -49,7 +49,7 @@ services:
     autoDeploy: true
     envVars:
       - key: REACT_APP_BACKEND_URL
-        value: https://onrender.com
+        value: https://architecht-backend.onrender.com
       - key: NODE_VERSION
         value: "20.11.0"
     routes:
