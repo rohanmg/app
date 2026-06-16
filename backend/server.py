@@ -30,9 +30,13 @@ import secrets
 
 # MongoDB
 mongo_url = os.environ["MONGO_URL"]
+allow_invalid_tls = os.environ.get("MONGO_TLS_ALLOW_INVALID_CERTS", "false").lower() in ("1", "true", "yes")
 mongo_connect_args = {}
 if "mongodb.net" in mongo_url and "tls=" not in mongo_url and "ssl=" not in mongo_url:
     mongo_connect_args["tls"] = True
+if allow_invalid_tls:
+    mongo_connect_args["tlsAllowInvalidCertificates"] = True
+    mongo_connect_args["tlsAllowInvalidHostnames"] = True
 mongo_client = AsyncIOMotorClient(mongo_url, **mongo_connect_args)
 db = mongo_client[os.environ["DB_NAME"]]
 users_col = db["users"]
