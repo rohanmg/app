@@ -30,7 +30,10 @@ import secrets
 
 # MongoDB
 mongo_url = os.environ["MONGO_URL"]
-mongo_client = AsyncIOMotorClient(mongo_url)
+mongo_connect_args = {}
+if "mongodb.net" in mongo_url and "tls=" not in mongo_url and "ssl=" not in mongo_url:
+    mongo_connect_args["tls"] = True
+mongo_client = AsyncIOMotorClient(mongo_url, **mongo_connect_args)
 db = mongo_client[os.environ["DB_NAME"]]
 users_col = db["users"]
 llds_col = db["llds"]
