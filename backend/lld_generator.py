@@ -197,10 +197,10 @@ def _invoke_bedrock(prompt: str) -> str:
         _sign_request(prepared)
 
     session = Session()
-    # Respect proxy env vars for environments that require routing through a proxy
+    # Use Bedrock-specific proxy vars only for Bedrock runtime calls.
     proxies = {}
-    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-    http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+    https_proxy = os.environ.get("BEDROCK_HTTPS_PROXY") or os.environ.get("bedrock_https_proxy")
+    http_proxy = os.environ.get("BEDROCK_HTTP_PROXY") or os.environ.get("bedrock_http_proxy")
     if https_proxy:
         proxies["https"] = https_proxy
     if http_proxy:
@@ -219,7 +219,7 @@ def _invoke_bedrock(prompt: str) -> str:
         if "Name or service not known" in msg or "Failed to establish a new connection" in msg:
             raise RuntimeError(
                 f"Bedrock runtime request failed: {exc}.\n"
-                "DNS resolution or network egress failed. If your deployment is in a private network, ensure it has NAT/VPC egress or set HTTPS_PROXY/HTTP_PROXY or BEDROCK_RUNTIME_URL to a reachable proxy/endpoint."
+                "DNS resolution or network egress failed. If your deployment is in a private network, ensure it has NAT/VPC egress or set BEDROCK_HTTPS_PROXY/BEDROCK_HTTP_PROXY or BEDROCK_RUNTIME_URL to a reachable proxy/endpoint."
             ) from exc
         raise RuntimeError(f"Bedrock runtime request failed: {exc}") from exc
 
