@@ -1,12 +1,13 @@
-"""Claude (via AWS Bedrock Runtime) LLD generation.
+"""Claude LLD generation via AWS Bedrock.
 
-Uses AWS Bedrock Runtime by default with a direct Bedrock API key or standard
-AWS credentials. Mantle is supported only when `USE_BEDROCK_MANTLE=true` is
-explicitly set in the backend environment.
+Uses Bedrock Mantle when `USE_BEDROCK_MANTLE=true` with a Mantle bearer token.
+Standard Bedrock Runtime is still available when `USE_BEDROCK_MANTLE=false`.
 
 Model id is fully configurable via `BEDROCK_MODEL_ID`:
-  - Sonnet 4.5: us.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - Haiku 4.5:  us.anthropic.claude-haiku-4-5-20251022-v1:0
+  - Mantle Sonnet: claude-sonnet-4-6
+  - Mantle Haiku:  claude-haiku-4-5
+  - Runtime Sonnet: apac.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - Runtime Haiku:  apac.anthropic.claude-haiku-4-5-20251022-v1:0
 """
 import asyncio
 import os
@@ -18,18 +19,36 @@ from requests import Request, Session
 from requests.exceptions import RequestException
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-BEDROCK_MODEL_ID = os.environ.get(
-    "BEDROCK_MODEL_ID",
-    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+USE_BEDROCK_MANTLE = os.environ.get("USE_BEDROCK_MANTLE", "false").lower() in ("1", "true", "yes")
+DEFAULT_BEDROCK_MODEL_ID = (
+    "claude-sonnet-4-6" if USE_BEDROCK_MANTLE else "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 )
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", DEFAULT_BEDROCK_MODEL_ID)
 BEDROCK_API_KEY = os.environ.get("BEDROCK_API_KEY", "")
 BEDROCK_RUNTIME_URL = os.environ.get(
     "BEDROCK_RUNTIME_URL",
     f"https://bedrock-runtime.{AWS_REGION}.api.aws",
 )
 
-USE_BEDROCK_MANTLE = os.environ.get("USE_BEDROCK_MANTLE", "false").lower() in ("1", "true", "yes")
+
+def _is_mantle_model_id(model_id: str) -> bool:
+    # Mantle expects Anthropic-style model names like `claude-sonnet-4-6` or `claude-haiku-4-5`.
+    return (
+        model_id.islower()
+        and "." not in model_id
+        and ":" not in model_id
+        and "anthropic" not in model_id
+        and "us" not in model_id
+        and "apac" not in model_id
+    )
+
+
 if USE_BEDROCK_MANTLE:
+    if not _is_mantle_model_id(BEDROCK_MODEL_ID):
+        raise RuntimeError(
+            "Bedrock Mantle model IDs must be short Anthropic names like `claude-sonnet-4-6` or `claude-haiku-4-5`. "
+            "Do not use runtime-style Bedrock model IDs such as `apac.anthropic.claude-...:0` when USE_BEDROCK_MANTLE=true."
+        )
     from anthropic import AsyncAnthropic
 
     AWS_BEARER_TOKEN_BEDROCK = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "")
@@ -239,7 +258,7 @@ async def generate_lld_stream(
     total_cost: float,
     xml_excerpt: str,
 ) -> AsyncIterator[str]:
-    """Stream markdown tokens from Bedrock Runtime."""
+    """Stream markdown tokens from Bedrock Bedrock Mantle or runtime."""
     user_prompt = _build_user_prompt(title, pages, service_counts, cost_breakdown, total_cost, xml_excerpt)
 
     if USE_BEDROCK_MANTLE:
