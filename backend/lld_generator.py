@@ -11,6 +11,7 @@ Model id is fully configurable via `BEDROCK_MODEL_ID`:
 """
 import asyncio
 import os
+import re
 import json
 from typing import AsyncIterator, Dict, List
 
@@ -43,10 +44,29 @@ def _is_mantle_model_id(model_id: str) -> bool:
     )
 
 
+def _normalize_mantle_model_id(model_id: str) -> str:
+    # Accept runtime-style Bedrock IDs for convenience and convert them to Mantle names.
+    # Example: apac.anthropic.claude-sonnet-4-6-20260326-v1:0 -> claude-sonnet-4-6
+    if not model_id.startswith("apac.anthropic."):
+        return model_id
+
+    base = model_id.split(":", 1)[0]
+    match = re.match(r"apac\.anthropic\.(claude-[^-]+-[^-]+(?:-[^-]+)*?)-\d{8}-v\d+$", base)
+    if not match:
+        return model_id
+
+    return match.group(1)
+
+
 if USE_BEDROCK_MANTLE:
+    normalized_model_id = _normalize_mantle_model_id(BEDROCK_MODEL_ID)
+    if normalized_model_id != BEDROCK_MODEL_ID:
+        BEDROCK_MODEL_ID = normalized_model_id
+
     if not _is_mantle_model_id(BEDROCK_MODEL_ID):
         raise RuntimeError(
-            "Bedrock Mantle model IDs must be short Anthropic names like `claude-sonnet-4-6` or `claude-haiku-4-5`. "
+            f"Bedrock Mantle model IDs must be short Anthropic names like `claude-sonnet-4-6` or `claude-haiku-4-5`. "
+            f"Received: {BEDROCK_MODEL_ID}. "
             "Do not use runtime-style Bedrock model IDs such as `apac.anthropic.claude-...:0` when USE_BEDROCK_MANTLE=true."
         )
     from anthropic import AsyncAnthropic
